@@ -1,0 +1,26 @@
+# build/runtime artifacts
+run/
+__pycache__/
+*.py[cod]
+*.log
+*.pcap
+*.pcapng
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# local config
+.env
+.env.*
+
+# editors / OS
+.DS_Store
+.vscode/
+.idea/
+
+# python envs
+.venv/
+venv/

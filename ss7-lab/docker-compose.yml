@@ -1,0 +1,10 @@
+services:
+  core:
+    image: ss7-lab:1
+    build: .
+    container_name: ss7-core
+    working_dir: /lab
+    volumes:
+      - .:/lab
+    command: bash -lc "./tools/run-core.sh && exec sleep infinity"
+    restart: unless-stopped

@@ -1,0 +1,164 @@
+name: 5glab
+
+networks:
+  core:
+    name: 5glab-net
+    driver: bridge
+
+volumes:
+  mongo-data:
+
+x-o5gs: &o5gs
+  image: gradiant/open5gs:2.8.0
+  networks: [core]
+  restart: on-failure
+  mem_limit: 192m
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: 5glab-mongo
+    command: ["--quiet"]
+    networks: [core]
+    volumes:
+      - mongo-data:/data/db
+    mem_limit: 320m
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  nrf:
+    <<: *o5gs
+    container_name: 5glab-nrf
+    command: open5gs-nrfd
+    depends_on: [mongo]
+
+  scp:
+    <<: *o5gs
+    container_name: 5glab-scp
+    command: open5gs-scpd
+    depends_on: [nrf]
+
+  ausf:
+    <<: *o5gs
+    container_name: 5glab-ausf
+    command: open5gs-ausfd
+    depends_on: [scp]
+
+  udr:
+    <<: *o5gs
+    container_name: 5glab-udr
+    command: open5gs-udrd
+    depends_on:
+      mongo:
+        condition: service_healthy
+      scp:
+        condition: service_started
+
+  udm:
+    <<: *o5gs
+    container_name: 5glab-udm
+    command: open5gs-udmd
+    depends_on: [udr]
+
+  pcf:
+    <<: *o5gs
+    container_name: 5glab-pcf
+    command: open5gs-pcfd
+    depends_on:
+      mongo:
+        condition: service_healthy
+      scp:
+        condition: service_started
+
+  nssf:
+    <<: *o5gs
+    container_name: 5glab-nssf
+    command: open5gs-nssfd
+    depends_on: [scp]
+
+  bsf:
+    <<: *o5gs
+    container_name: 5glab-bsf
+    command: open5gs-bsfd
+    depends_on: [scp]
+
+  amf:
+    <<: *o5gs
+    container_name: 5glab-amf
+    command: open5gs-amfd
+    depends_on: [scp]
+    volumes:
+      - ./amf.yaml:/opt/open5gs/etc/open5gs/amf.yaml:ro
+
+  upf:
+    <<: *o5gs
+    container_name: 5glab-upf
+    command: open5gs-upfd
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/upf-entry.sh"]
+    cap_add: [NET_ADMIN]
+    devices:
+      - "/dev/net/tun:/dev/net/tun"
+    volumes:
+      - ./upf-entry.sh:/upf-entry.sh:ro
+    sysctls:
+      net.ipv4.ip_forward: "1"
+      net.ipv6.conf.all.disable_ipv6: "0"
+
+  smf:
+    <<: *o5gs
+    container_name: 5glab-smf
+    command: open5gs-smfd
+    depends_on:
+      scp:
+        condition: service_started
+      upf:
+        condition: service_started
+    volumes:
+      - ./smf-fd.conf:/opt/open5gs/etc/freeDiameter/smf.conf:ro
+
+  gnb:
+    image: gradiant/ueransim:3.3.0
+    container_name: 5glab-gnb
+    command: gnb
+    networks: [core]
+    restart: "no"
+    mem_limit: 128m
+    depends_on: [amf]
+    environment:
+      MCC: "999"
+      MNC: "70"
+      TAC: "1"
+      SST: "1"
+      SD: "000001"
+      N2_IFACE: eth0
+      N3_IFACE: eth0
+      RADIO_IFACE: eth0
+      AMF_HOSTNAME: amf
+
+  ue:
+    image: gradiant/ueransim:3.3.0
+    container_name: 5glab-ue
+    command: ue
+    networks: [core]
+    restart: "no"
+    mem_limit: 128m
+    depends_on: [gnb]
+    user: "0:0"
+    cap_add: [NET_ADMIN]
+    devices:
+      - "/dev/net/tun:/dev/net/tun"
+    environment:
+      MCC: "999"
+      MNC: "70"
+      MSISDN: "0000000001"
+      KEY: "465B5CE8B199B49FAA5F0A2EE238A6BC"
+      OP: "E8ED2A9CDFB6DFC9E1E6B4B0A5C1D9E2"
+      OP_TYPE: "OPC"
+      APN: "internet"
+      SST: "1"
+      SD: "000001"
+      GNB_HOSTNAME: gnb

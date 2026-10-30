@@ -36,8 +36,13 @@ language and name every protocol you will meet.
 - Read MAP messages (`sendRoutingInfoForSM`, `provideSubscriberInfo`,
   `updateLocation`, `sendAuthInfo`) as both hex and named fields, validated by
   the actual 3GPP ASN.1.
-- Test a detection idea (for example, a per-IMSI query burst) against the mock
-  HLR without any connection to a live network.
+- Learn a baseline from quiet traffic, then watch three detection rules catch a
+  burst against one IMSI and a sweep across ten IMSIs
+  (`ss7-lab/tools/detect-demo.sh`).
+- Read the defensive reasoning behind it all in
+  [`docs/threat-model.md`](docs/threat-model.md): how signalling access exists
+  as a supply chain, why SMS OTP fails against SIM swap, and why a phone number
+  cannot be treated as a secret.
 
 ## Architecture
 
@@ -119,9 +124,12 @@ See [SECURITY.md](SECURITY.md) for reporting and the full boundary.
 ## Repo layout
 
 ```
-mobile-core-labs/
+mobile-network-labs/
 ├── 5g-lab/          # Open5GS + UERANSIM compose stack, provisioning, scripts
-└── ss7-lab/         # Osmocom core, MAP/TCAP tools, configs, scripts
+├── ss7-lab/         # Osmocom core, MAP/TCAP tools, audit log, detection, configs
+├── docs/            # threat-model.md: access classes, SIM swap, identity resolution
+├── SECURITY.md      # scope and responsible-use boundary
+└── THIRD_PARTY.md   # licenses of everything pulled or derived
 ```
 
 ## Suggested learning path
@@ -130,11 +138,15 @@ mobile-core-labs/
 2. Delete the subscriber, watch registration fail, re-add it.
 3. Bring up `ss7-lab/`, read the four MAP operations in the demo output.
 4. Capture SCTP and match the packets to the ASP states in the STP.
-5. Change the mock's location/age values in `ss7-lab/tools/mapops.py` and watch
+5. Run `ss7-lab/tools/detect-demo.sh`: quiet baseline, then a burst, then a
+   sweep. Change the thresholds and re-run until you can say why each finding
+   fired, and what a legitimate retry storm would do to it.
+6. Change the mock's location/age values in `ss7-lab/tools/mapops.py` and watch
    the BER bytes move. Then add a fifth operation and let pycrate reject your
    tags until they are right.
 
-Step 5 is where "ran a lab" turns into "understands the encoding".
+Step 6 is where "ran a lab" turns into "understands the encoding". Step 5 is
+where it turns into "can defend it".
 
 ## References
 

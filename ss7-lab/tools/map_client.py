@@ -1,5 +1,13 @@
 """MAP client: walks a full SRISM -> PSI -> UpdateLocation dialogue against
-the mock HLR and prints every layer. Nothing touches a real network."""
+the mock HLR and prints every layer. Nothing touches a real network.
+
+Modes:
+  (default)   one full four-operation dialogue, verbosely
+  --quiet     one line per operation
+  --repeat N  repeat the dialogue N times (a legitimate retry storm or a burst)
+  --sweep N   ask provideSubscriberInfo for N different IMSIs from one source
+"""
+import argparse
 import os
 import socket
 import struct
@@ -27,12 +35,13 @@ def recv_exact(sock, n):
     return buf
 
 
-def call(op, arg, label):
+def call(op, arg, label, quiet=False):
     otid = os.urandom(4)
     req = begin(otid, invoke(1, op, arg))
     print("\n=== %s (op %d)" % (label, op))
     print("request  %d bytes" % len(req))
-    print(hexdump(req))
+    if not quiet:
+        print(hexdump(req))
     try:
         print("decoded request arg:", m.human(op, m.validate(op, arg)))
     except Exception as e:
@@ -42,7 +51,8 @@ def call(op, arg, label):
         ln = struct.unpack(">I", recv_exact(s, 4))[0]
         resp = recv_exact(s, ln)
     print("response %d bytes" % len(resp))
-    print(hexdump(resp))
+    if not quiet:
+        print(hexdump(resp))
     d = parse_tcap(resp)
     for c in d["components"]:
         if c["kind"] == "ReturnError":
@@ -56,16 +66,40 @@ def call(op, arg, label):
             print("  <- result decode failed:", e)
 
 
-def main():
+def dialogue(quiet=False):
     call(45, m.sri_sm_arg("+15551234567", SC),
-         "SRISM  sendRoutingInfoForSM  (where to deliver an SMS)")
+         "SRISM  sendRoutingInfoForSM  (where to deliver an SMS)", quiet)
     call(70, m.psi_arg(IMSI),
-         "PSI    provideSubscriberInfo (where is the subscriber)")
+         "PSI    provideSubscriberInfo (where is the subscriber)", quiet)
     call(2, m.ul_arg(IMSI, MSC, VLR),
-         "UL     updateLocation        (roaming attach)")
+         "UL     updateLocation        (roaming attach)", quiet)
     call(56, m.sai_arg(IMSI),
-         "SAI    sendAuthInfo          (auth vectors)")
+         "SAI    sendAuthInfo          (auth vectors)", quiet)
+
+
+def sweep(n, quiet=False):
+    for i in range(n):
+        imsi = "00101012345%04d" % i
+        call(70, m.psi_arg(imsi), "PSI    provideSubscriberInfo %s" % imsi, quiet)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--quiet", action="store_true",
+                    help="one line per operation (skip hexdumps)")
+    ap.add_argument("--repeat", type=int, default=1,
+                    help="repeat the four-operation dialogue N times")
+    ap.add_argument("--sweep", type=int, default=0,
+                    help="query N different IMSIs from this one source")
+    args = ap.parse_args()
+    if args.sweep:
+        sweep(args.sweep, args.quiet)
+    else:
+        for _ in range(max(1, args.repeat)):
+            dialogue(args.quiet)
     print("\nTCAP/MAP dialogue complete; transport here is TCP framing.")
+    return 0
 
 
 if __name__ == "__main__":

@@ -26,6 +26,43 @@ docker compose exec -T core ./tools/capture-sctp.sh   # tcpdump lo, bounces MSC
 
 Reset the subscriber DB: `rm -f run/hlr.db` (then `./up.sh`).
 
+### Detection exercise
+
+`tools/hlr_mock.py` appends one JSON line per invoke to `run/hlr_audit.jsonl`
+(timestamp, source, operation, resolved IMSI, result). `tools/query_monitor.py`
+turns that into findings, the same way an SS7 firewall or HLR fraud system would:
+
+```sh
+./up.sh                 # core + mock + the normal demo
+./tools/detect-demo.sh  # baseline, burst, sweep (runs on the host)
+```
+
+The demo runs three phases against one audit file:
+
+| Phase | Traffic | Expected |
+|-------|---------|----------|
+| 1 | one legitimate dialogue (4 ops, 1 IMSI) | no findings; baseline saved to `run/baseline.json` |
+| 2 | the same dialogue six times | `imsi-burst` HIGH, with the learned baseline beside it |
+| 3 | `provideSubscriberInfo` for 10 IMSIs from one source | `imsi-sweep` HIGH |
+
+Useful by hand:
+
+```sh
+docker compose exec -T core python3 tools/query_monitor.py --once --json
+docker compose exec -T core python3 tools/query_monitor.py --follow --baseline-file run/baseline.json
+docker compose exec -T core python3 tools/map_client.py --quiet --repeat 10   # burst
+docker compose exec -T core python3 tools/map_client.py --quiet --sweep 25    # enumeration
+```
+
+Defaults: window 60 s, `--warn 6` / `--alert 12` ops per IMSI, sweep
+`--sweep-warn 4` / `--sweep-alert 8` distinct IMSIs per source. Exit status is
+0/1/2 (none/MEDIUM/HIGH), so it can gate a pipeline.
+
+Honest limits: a legitimate retry storm looks exactly like a burst, and a patient
+attacker sending one query per day never trips a rate rule. Real deployments add
+origin, roaming-agreement context, and per-subscriber history; see
+[`../docs/threat-model.md`](../docs/threat-model.md).
+
 ## Ports (inside the container)
 
 | Port | Proto | Service |
@@ -54,6 +91,9 @@ match real MAP, not a hand-rolled guess:
 * UpdateLocation arg `imsi` (untagged), `msc-Number [1]`, `vlr-Number` (untagged)
 * ProvideSubscriberInfo arg `imsi [0]`, `requestedInfo [2] -> locationInformation [0] (NULL)`
 * ProvideSubscriberInfo res `subscriberInfo -> locationInformation -> age (int) + vlr-number [1]`
+
+The mock also writes the audit trail consumed by `query_monitor.py`, and the
+client has `--repeat`, `--sweep`, `--quiet` modes used by the detection demo.
 
 Osmocom side, verified by capture and VTY:
 
